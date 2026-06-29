@@ -1,0 +1,30 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: address_poc_db
+    environment:
+      POSTGRES_USER: poc_user
+      POSTGRES_PASSWORD: poc_pass
+      POSTGRES_DB: address_poc
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  pyspark:
+    build:
+      context: .
+      dockerfile: Dockerfile.pyspark
+    container_name: address_poc_spark
+    depends_on:
+      - postgres
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+    command: tail -f /dev/null   # keeps container alive so you can exec into it
+
+volumes:
+  pgdata:
