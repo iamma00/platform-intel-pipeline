@@ -6,18 +6,49 @@ metadata:
 spec:
   type: Python
   mode: cluster
-  image: "<your-dockerhub-username>/address-classifier:v1"
+  image: "iamma00/address-classifier:v1"
   imagePullPolicy: Always
   mainApplicationFile: local:///app/src/classify.py
   sparkVersion: 3.5.1
-  sparkConf:
-    "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem"
-    "spark.hadoop.fs.s3a.endpoint": "s3.ap-south-1.amazonaws.com"
   driver:
     cores: 1
-    memory: 1g
+    coreRequest: "300m"
+    memory: 512m
     serviceAccount: spark-operator-spark
+    volumeMounts:
+      - name: address-data
+        mountPath: /data
+    env:
+      - name: POSTGRES_USER
+        valueFrom:
+          secretKeyRef:
+            name: postgres-creds
+            key: username
+      - name: POSTGRES_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: postgres-creds
+            key: password
   executor:
     cores: 1
+    coreRequest: "300m"
     instances: 2
-    memory: 1g
+    memory: 512m
+    volumeMounts:
+      - name: address-data
+        mountPath: /data
+    env:
+      - name: POSTGRES_USER
+        valueFrom:
+          secretKeyRef:
+            name: postgres-creds
+            key: username
+      - name: POSTGRES_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: postgres-creds
+            key: password
+  volumes:
+    - name: address-data
+      persistentVolumeClaim:
+        claimName: address-data-pvc

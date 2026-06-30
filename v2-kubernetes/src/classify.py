@@ -1,3 +1,4 @@
+import os
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import lower, col, when, udf
 from pyspark.sql.types import StringType
@@ -10,10 +11,14 @@ CORPORATE_KEYWORDS = ['pvt ltd', 'llp', 'tower', 'floor', 'park',
 RESIDENTIAL_KEYWORDS = ['house no', 'h.no', 'flat', 'society', 'nagar',
                          'apartment', 'colony', 'residency', 'row house']
 
-S3_INPUT_PATH = "s3a://address-intel-pipeline-poc/raw/addresses.csv"
+INPUT_PATH = "/data/addresses.csv"  # mounted PVC path (NFS-backed)
 
-JDBC_URL = "jdbc:postgresql://POSTGRES_HOST:5432/address_poc"
-JDBC_PROPS = {"user": "poc_user", "password": "poc_pass", "driver": "org.postgresql.Driver"}
+JDBC_URL = "jdbc:postgresql://postgres-postgresql.default.svc.cluster.local:5432/address_poc"
+JDBC_PROPS = {
+    "user": os.environ.get("POSTGRES_USER", "poc_user"),
+    "password": os.environ.get("POSTGRES_PASSWORD"),
+    "driver": "org.postgresql.Driver",
+}
 
 
 def get_matches(address, keyword_list):
@@ -34,8 +39,6 @@ def confidence_udf(address):
 def build_spark():
     return SparkSession.builder \
         .appName("AddressClassifierK8s") \
-        .config("spark.hadoop.fs.s3a.aws.credentials.provider",
-                "com.amazonaws.auth.InstanceProfileCredentialsProvider") \
         .getOrCreate()
 
 
@@ -63,21 +66,31 @@ def classify_df(df):
 
 def main():
     spark = build_spark()
+    try:
+        if not JDBC_PROPS["password"]:
+            raise ValueError("POSTGRES_PASSWORD env var is not set")
 
-    df = spark.read.csv(S3_INPUT_PATH, header=True, inferSchema=True)
-    classified_df = classify_df(df)
-    classified_df.select("name", "address", "address_type", "matched_keywords", "confidence") \
-        .show(30, truncate=False)
+        df = spark.read.csv(INPUT_PATH, header=True, inferSchema=True)
+        if df.rdd.isEmpty():
+            raise ValueError(f"No data found at {INPUT_PATH}")
 
-    print("\n--- Classification Summary ---")
-    classified_df.groupBy("address_type").count().show()
+        classified_df = classify_df(df)
+        classified_df.select("name", "address", "address_type", "matched_keywords", "confidence") \
+            .show(30, truncate=False)
 
-    classified_df.select("name", "address", "pincode", "city",
-                          "address_type", "matched_keywords", "confidence") \
-        .write.jdbc(url=JDBC_URL, table="addresses", mode="append", properties=JDBC_PROPS)
+        print("\n--- Classification Summary ---")
+        classified_df.groupBy("address_type").count().show()
 
-    print("Written to Postgres.")
-    spark.stop()
+        classified_df.select("name", "address", "pincode", "city",
+                              "address_type", "matched_keywords", "confidence") \
+            .write.jdbc(url=JDBC_URL, table="addresses", mode="overwrite", properties=JDBC_PROPS)
+
+        print("Written to Postgres.")
+    except Exception as e:
+        print(f"Job failed: {e}")
+        raise
+    finally:
+        spark.stop()
 
 
 if __name__ == "__main__":
