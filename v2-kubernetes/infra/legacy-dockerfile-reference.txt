@@ -1,0 +1,23 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install Java (required for Spark) + curl
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends default-jdk-headless curl procps && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Find Java home dynamically (works regardless of which JDK version trixie installs)
+ENV JAVA_HOME=/usr/lib/jvm/default-java
+ENV PATH=$JAVA_HOME/bin:$PATH
+
+# Python libs
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# PostgreSQL JDBC driver
+RUN mkdir -p /opt/spark-jars && \
+    curl -L -o /opt/spark-jars/postgresql-42.7.3.jar \
+    https://jdbc.postgresql.org/download/postgresql-42.7.3.jar
+
+CMD ["tail", "-f", "/dev/null"]
